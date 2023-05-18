@@ -18,8 +18,10 @@
 </head>
 <body>
     <input id="fileinput" type="file" />
+    <h1 id="model-title">Only input STL files.</h1>
     <canvas id="canvas" width="800" height="600" />
     <script>
+        const modelTitle = document.getElementById("model-title");
         const canvas = document.getElementById("canvas");
         const fileinput = document.getElementById("fileinput");
 
@@ -74,15 +76,19 @@
 
         let triangles = [];
 
-        async function readStl(file) {
+        /**Reads an ASCII STL file. No checking will be done regarding file format.
+         * @param {File} file
+         */
+        async function readASCIIStl(file) {
             const triangles = [];
             const text = await file.text();
             const lines = text.split(/\r?\n|\r|\n/g);
 
+            let name = "Untitled"
             let normal;
             let vertices = [];
             for (line of lines) {
-                const split = line.split(" ");
+                const split = line.trim().split(" ");
                 if (split.size < 1) continue;
                 if (split[0] == "facet") {
                     vertices = [];
@@ -94,12 +100,70 @@
                 } else if (split[0] == "endfacet") {
                     triangles.push(new Triangle(vertices[0], vertices[1], vertices[2], normal));
                     normal = undefined;
+                } else if (split[0] == "solid") {
+                    name = line.substring("solid ".length);
                 }
             }
 
-            return triangles;
+            return { name, triangles };
         }
 
+        /**Reads a binary STL file. No checking will be done regarding file format.
+         * @param {File} file
+         */
+        async function readBinaryStl(file) {
+            const triangles = [];
+            const enc = new TextDecoder("utf-8");
+            const buffer = await file.arrayBuffer();
+            const view = new DataView(buffer);
+
+            const name = enc.decode(buffer.slice(0, 80));
+
+            const numTriangles = view.getUint32(80, true);
+
+            let currentStart = 84;
+            for (let i = 0; i < numTriangles - 1; i++) {
+                const floatBuffer = buffer.slice(currentStart, currentStart + 48);
+
+                const normal = new Float32Array(floatBuffer, 0, 3);
+                const v1 = new Float32Array(floatBuffer, 12, 3);
+                const v2 = new Float32Array(floatBuffer, 24, 3);
+                const v3 = new Float32Array(floatBuffer, 36, 3);
+                const numAttr = view.getUint16(currentStart + 48);
+
+                triangles.push(new Triangle(v1, v2, v3, normal));
+                currentStart += 50 + numAttr;
+            }
+
+            return { name, triangles };
+        }
+
+        /**Infers the type of the given STL file and return a Promise that resolves
+         * to an object of a triangle array and object name.
+         * 
+         * Files that are not STL and don't start with the string "solid" will be read
+         * as binary STL files.
+         * 
+         * @param {File} file
+         */
+        async function readStl(file) {
+            const filesize = file.size;
+            if (filesize < 8) return Promise.reject(new Exception("STL file is too short."));
+
+            const firstChars = await file.slice(0, 8).text();
+            if (firstChars.substr(0, 5) == "solid") {
+                return readASCIIStl(file);
+            } else {
+                return readBinaryStl(file);
+            }
+        }
+
+        /**Divides the first and second coordinates by the third coordinate and scales.
+         * 
+         * The second coordinate is kept the same meaning this is not projective division.
+         * 
+         * @param {Iterable<number>} v mutated vector of size 3
+         */
         function perspectiveDivide(v) {
             const fac = 5 / v[2];
             v[0] *= fac;
@@ -109,6 +173,12 @@
         let cameraRotation = Quaternion.fromAxisAngle(Math.PI / 2, 1, 0, 0);
 
         let lastt = 0;
+
+        /**Renders all triangles in the triangles array if they appear clockwise to the camera.
+         * Current version uses random stroke colors.
+         * 
+         * @param {number} t timestamp for animations
+         */
         function render(t) {
             const cameraPosition = cameraRotation.rotateVector([0, 0, 10], [0, 0, 0]);
 
@@ -153,21 +223,24 @@
         }
 
         function onFileAdd(e) {
-            readStl(e.target.files[0]).then(tris => {
-                if (tris) {
-                    triangles = tris;
+            readStl(e.target.files[0]).then(info => {
+                if (info) {
+                    triangles = info.triangles;
                     console.log(triangles[0]);
+                    modelTitle.innerHTML = info.name;
                     render(0);
                 }
+            }).catch(e => {
+                console.log(ii);
+                console.error(e);
+                modelTitle.innerHTML = e;
             });
         }
 
         let pointerDown = false;
         let prevPos = [0, 0];
         let rotateSpeed = Math.PI / 100;
-        /**
-         * @param {PointerEvent} e
-         */
+        
         function onPointerDown(e) {
             pointerDown = true;
             prevPos[0] = e.offsetX;
