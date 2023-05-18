@@ -18,12 +18,20 @@
 </head>
 <body>
     <input id="fileinput" type="file" />
+    <a class="load-stl-link" href="#gun.stl" data-file="gun.stl">Load Gun Demo Model (ASCII)</a>
+    <a class="load-stl-link" href="#marine.stl" data-file="marine.stl">Load Marine Demo Model (binary)</a>
     <h1 id="model-title">Only input STL files.</h1>
-    <canvas id="canvas" width="800" height="600" />
+    <canvas id="canvas" width="800" height="600"></canvas>
+    <input id="panning" type="checkbox" value="panning" />
+    <label for="panning">Panning</label>
+    <button id="reset-view">Reset View</button>
     <script>
+        const fileinput = document.getElementById("fileinput");
         const modelTitle = document.getElementById("model-title");
         const canvas = document.getElementById("canvas");
-        const fileinput = document.getElementById("fileinput");
+        const panning = document.getElementById("panning");
+        const resetView = document.getElementById("reset-view");
+        const loadStlLinks = document.getElementsByClassName("load-stl-link");
 
         const ctx = canvas.getContext("2d");
 
@@ -105,7 +113,7 @@
                 }
             }
 
-            return { name, triangles };
+            return { name, triangles, numTriangles: triangles.length };
         }
 
         /**Reads a binary STL file. No checking will be done regarding file format.
@@ -120,7 +128,6 @@
             const name = enc.decode(buffer.slice(0, 80));
 
             const numTriangles = view.getUint32(80, true);
-
             let currentStart = 84;
             for (let i = 0; i < numTriangles; i++) {
                 const floatBuffer = buffer.slice(currentStart, currentStart + 48);
@@ -135,7 +142,7 @@
                 currentStart += 50 + numAttr;
             }
 
-            return { name, triangles };
+            return { name, triangles, numTriangles };
         }
 
         /**Infers the type of the given STL file and return a Promise that resolves
@@ -171,6 +178,8 @@
         }
 
         let cameraRotation = Quaternion.fromAxisAngle(Math.PI / 2, 1, 0, 0);
+        let cameraOffset = [0, 0, 0];
+        let cameraZoom = 10;
 
         let lastt = 0;
 
@@ -180,7 +189,10 @@
          * @param {number} t timestamp for animations
          */
         function render(t) {
-            const cameraPosition = cameraRotation.rotateVector([0, 0, 10], [0, 0, 0]);
+            const cameraPosition = cameraRotation.rotateVector([0, 0, cameraZoom], [0, 0, 0]);
+            cameraPosition[0] += cameraOffset[0];
+            cameraPosition[1] += cameraOffset[1];
+            cameraPosition[2] += cameraOffset[2];
 
             const inverseQuat = cameraRotation.conjugate();
 
@@ -222,25 +234,29 @@
             ctx.stroke();
         }
 
-        function onFileAdd(e) {
-            readStl(e.target.files[0]).then(info => {
+        function loadStl(file) {
+            readStl(file).then(info => {
                 if (info) {
                     triangles = info.triangles;
-                    console.log(triangles[0]);
-                    modelTitle.innerHTML = info.name;
+                    modelTitle.innerHTML = `${info.name} - ${info.numTriangles} triangles`;
                     render(0);
                 }
             }).catch(e => {
-                console.log(ii);
                 console.error(e);
                 modelTitle.innerHTML = e;
             });
         }
 
+        function onFileAdd(e) {
+            loadFile(e.target.files[0]);
+        }
+
         let pointerDown = false;
         let prevPos = [0, 0];
-        let rotateSpeed = Math.PI / 100;
-        
+        const rotateSpeed = Math.PI / 100;
+        const zoomSpeed = 0.02;
+        const panSpeed = 0.1;
+
         function onPointerDown(e) {
             pointerDown = true;
             prevPos[0] = e.offsetX;
@@ -259,8 +275,6 @@
                 cameraRotation = cameraRotation.multiply(Quaternion.fromAxisAngle(rotateSpeed * diffX, 0, 1, 0));
                 cameraRotation = cameraRotation.multiply(Quaternion.fromAxisAngle(rotateSpeed * diffY, 1, 0, 0));
 
-                console.log(cameraRotation);
-
                 render(0);
 
                 prevPos[0] = e.offsetX;
@@ -268,11 +282,59 @@
             }
         }
 
+        function onWheel(e) {
+            e.preventDefault();
+
+            const isPanning = panning.checked;
+
+            if (isPanning) {
+                const delta = cameraRotation.rotateVector([-panSpeed * e.deltaX, -panSpeed * e.deltaY, 0], [0, 0, 0]);
+                cameraOffset[0] += delta[0];
+                cameraOffset[1] += delta[1];
+                cameraOffset[2] += delta[2];
+            } else {
+                cameraZoom *= Math.pow(2, zoomSpeed * e.deltaY);
+                if (cameraZoom < 1) cameraZoom = 1;
+                if (cameraZoom > 100) cameraZoom = 100;
+            }
+            render(0);
+        }
+
+        function onResetViewClick(e) {
+            cameraZoom = 10;
+            cameraOffset = [0, 0, 0];
+            cameraRotation = Quaternion.fromAxisAngle(Math.PI / 2, 1, 0, 0);
+            render(0);
+        }
+
         fileinput.addEventListener("change", onFileAdd);
+        resetView.addEventListener("click", onResetViewClick);
         canvas.addEventListener("pointerdown", onPointerDown);
         canvas.addEventListener("pointerup", onPointerUp);
         canvas.addEventListener("pointercancel", onPointerUp);
         canvas.addEventListener("pointermove", onPointerMove);
+        canvas.addEventListener("wheel", onWheel);
+
+        /* Load STL by anchor tag and links stuff */
+        
+        function loadStlFromPath(path) {
+            fetch(path).then(r => r.blob()).then(loadStl).catch(e => {
+                console.error(e);
+                modelTitle.innerHTML = e;
+            });
+        }
+
+        function onLoadStlLinkClick(e) {
+            loadStlFromPath(this.dataset.file);
+        }
+
+        for (let el of loadStlLinks) {
+            el.addEventListener("click", onLoadStlLinkClick);
+        }
+
+        if (window.location.hash.length > 0) {
+            loadStlFromPath(window.location.hash.substr(1));
+        }
     </script>
 </body>
 </html>
