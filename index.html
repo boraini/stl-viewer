@@ -248,7 +248,7 @@
         }
 
         function onFileAdd(e) {
-            loadFile(e.target.files[0]);
+            loadStl(e.target.files[0]);
         }
 
         let pointerDown = false;
@@ -316,7 +316,7 @@
         canvas.addEventListener("wheel", onWheel);
 
         /* Load STL by anchor tag and links stuff */
-        
+
         function loadStlFromPath(path) {
             fetch(path).then(r => r.blob()).then(loadStl).catch(e => {
                 console.error(e);
