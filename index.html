@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>STL Viewer</title>
+    <style>
+        #canvas {
+            display: block;
+            width: 100%;
+            max-width: 800px;
+            height: auto;
+            touch-action: none;
+            border: 1px solid black;
+        }
+    </style>
+</head>
+<body>
+    <input id="fileinput" type="file" />
+    <canvas id="canvas" width="800" height="600" />
+    <script>
+        const canvas = document.getElementById("canvas");
+        const fileinput = document.getElementById("fileinput");
+
+        const ctx = canvas.getContext("2d");
+
+        class Quaternion {
+            constructor(w, x, y, z) {
+                this.w = w; this.x = x; this.y = y; this.z = z;
+            }
+            conjugate() {
+                return new Quaternion(this.w, -this.x, -this.y, -this.z);
+            }
+            multiply(other) {
+                return new Quaternion(
+                    this.w * other.w
+                    - this.x * other.x
+                    - this.y * other.y
+                    - this.z * other.z,
+                    this.x * other.w
+                    + this.w * other.x
+                    + this.y * other.z
+                    - this.z * other.y,
+                    this.w * other.y
+                    - this.x * other.z
+                    + this.y * other.w
+                    + this.z * other.x,
+                    this.w * other.z
+                    + this.x * other.y
+                    - this.y * other.x
+                    + this.z * other.w
+                );
+            }
+            rotateVector(v, r) {
+                const result = this.multiply(new Quaternion(0, v[0] - r[0], v[1] - r[1], v[2] - r[2])).multiply(this.conjugate());
+                return [result.x, result.y, result.z];
+            }
+        }
+
+        Quaternion.fromAxisAngle = function (angle, x, y, z) {
+            const norm = 1 / Math.sqrt(x * x + y * y + z * z);
+            return new Quaternion(Math.cos(angle * 0.5), x * norm * Math.sin(angle * 0.5), y * norm * Math.sin(angle * 0.5), z * norm * Math.sin(angle * 0.5));
+        }
+
+        class Triangle {
+            constructor(v1, v2, v3, n) {
+                this.normal = n;
+                this.v1 = v1;
+                this.v2 = v2;
+                this.v3 = v3;
+            }
+        }
+
+        let triangles = [];
+
+        async function readStl(file) {
+            const triangles = [];
+            const text = await file.text();
+            const lines = text.split(/\r?\n|\r|\n/g);
+
+            let normal;
+            let vertices = [];
+            for (line of lines) {
+                const split = line.split(" ");
+                if (split.size < 1) continue;
+                if (split[0] == "facet") {
+                    vertices = [];
+                    if (split[1] == "normal") {
+                        normal = split.slice(2).map(x => parseFloat(x));
+                    }
+                } else if (split[0] == "vertex") {
+                    vertices.push(split.slice(1).map(x => parseFloat(x)));
+                } else if (split[0] == "endfacet") {
+                    triangles.push(new Triangle(vertices[0], vertices[1], vertices[2], normal));
+                    normal = undefined;
+                }
+            }
+
+            return triangles;
+        }
+
+        function perspectiveDivide(v) {
+            const fac = 5 / v[2];
+            v[0] *= fac;
+            v[1] *= fac;
+        }
+
+        let cameraRotation = Quaternion.fromAxisAngle(Math.PI / 2, 1, 0, 0);
+
+        let lastt = 0;
+        function render(t) {
+            const cameraPosition = cameraRotation.rotateVector([0, 0, 10], [0, 0, 0]);
+
+            const inverseQuat = cameraRotation.conjugate();
+
+            ctx.resetTransform();
+            ctx.clearRect(0, 0, 800, 600);
+            ctx.translate(400, 300);
+            ctx.scale(300, 300);
+            ctx.lineWidth = 0.001;
+            for (let triangle of triangles) {
+                const v1 = inverseQuat.rotateVector(triangle.v1, cameraPosition);
+                const v2 = inverseQuat.rotateVector(triangle.v2, cameraPosition);
+                const v3 = inverseQuat.rotateVector(triangle.v3, cameraPosition);
+                perspectiveDivide(v1);
+                perspectiveDivide(v2);
+                perspectiveDivide(v3);
+
+                const diffax = v1[0] - v2[0];
+                const diffay = v1[1] - v2[1];
+
+                const diffbx = v3[0] - v2[0];
+                const diffby = v3[1] - v2[1];
+
+                if (diffax * diffby - diffay * diffbx > 0) continue;
+
+                ctx.strokeStyle = "#" + (0x010000 + Math.floor(0xFEFFFF * Math.random())).toString(16);
+                ctx.beginPath();
+                ctx.moveTo(...v1);
+                ctx.lineTo(...v2);
+                ctx.lineTo(...v3);
+                ctx.closePath();
+                ctx.stroke();
+            }
+
+            ctx.strokeStyle = "white";
+            ctx.beginPath(-1, -1);
+            ctx.lineTo(1, 1);
+            ctx.lineTo(1, -1);
+            ctx.closePath();
+            ctx.stroke();
+        }
+
+        function onFileAdd(e) {
+            readStl(e.target.files[0]).then(tris => {
+                if (tris) {
+                    triangles = tris;
+                    console.log(triangles[0]);
+                    render(0);
+                }
+            });
+        }
+
+        let pointerDown = false;
+        let prevPos = [0, 0];
+        let rotateSpeed = Math.PI / 100;
+        /**
+         * @param {PointerEvent} e
+         */
+        function onPointerDown(e) {
+            pointerDown = true;
+            prevPos[0] = e.offsetX;
+            prevPos[1] = e.offsetY;
+        }
+
+        function onPointerUp(e) {
+            pointerDown = false;
+        }
+
+        function onPointerMove(e) {
+            if (pointerDown) {
+                const diffX = e.offsetX - prevPos[0];
+                const diffY = e.offsetY - prevPos[1];
+
+                cameraRotation = cameraRotation.multiply(Quaternion.fromAxisAngle(rotateSpeed * diffX, 0, 1, 0));
+                cameraRotation = cameraRotation.multiply(Quaternion.fromAxisAngle(rotateSpeed * diffY, 1, 0, 0));
+
+                console.log(cameraRotation);
+
+                render(0);
+
+                prevPos[0] = e.offsetX;
+                prevPos[1] = e.offsetY;
+            }
+        }
+
+        fileinput.addEventListener("change", onFileAdd);
+        canvas.addEventListener("pointerdown", onPointerDown);
+        canvas.addEventListener("pointerup", onPointerUp);
+        canvas.addEventListener("pointercancel", onPointerUp);
+        canvas.addEventListener("pointermove", onPointerMove);
+    </script>
+</body>
+</html>
