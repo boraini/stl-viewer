@@ -6,21 +6,25 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>STL Viewer</title>
     <style>
+        .title {
+            margin: 0.2em;
+            font-size: 1.2em;
+        }
         #canvas {
             display: block;
             width: 100%;
             max-width: 800px;
             height: auto;
-            touch-action: none;
+            touch-action: pan-x pan-y;
             border: 1px solid black;
         }
     </style>
 </head>
 <body>
-    <input id="fileinput" type="file" />
-    <a class="load-stl-link" href="#gun.stl" data-file="gun.stl">Load Gun Demo Model (ASCII)</a>
+    Load STL from file: <input id="fileinput" type="file" /><br/>
+    <a class="load-stl-link" href="#gun.stl" data-file="gun.stl">Load Gun Demo Model (ASCII)</a><br/>
     <a class="load-stl-link" href="#marine.stl" data-file="marine.stl">Load Marine Demo Model (binary)</a>
-    <h1 id="model-title">Only input STL files.</h1>
+    <h1 id="model-title" class="title">Only input STL files.</h1>
     <canvas id="canvas" width="800" height="600"></canvas>
     <input id="panning" type="checkbox" value="panning" />
     <label for="panning">Panning</label>
